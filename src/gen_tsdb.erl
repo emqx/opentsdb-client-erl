@@ -45,10 +45,10 @@
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->
-    start_link("127.0.0.1:4242").
+    start_link([]).
 
-start_link(Authority) ->
-    gen_server:start_link(?MODULE, [Authority], []).
+start_link(Opts) ->
+    gen_server:start_link(?MODULE, [Opts], []).
 
 -spec(put(pid(), metric(), value(), tags()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
 put(Pid, Metric, Value, Tags) ->
@@ -98,14 +98,13 @@ unix_timestamp(milliseconds) ->
 
 %% gen_server.
 
-init([Authority]) ->
-    Props = application:get_env(?APP, put, []),
-    State = #state{authority      = Authority,
-                   summary        = {present, proplists:get_value(summary, Props, true)},
-                   details        = {present, proplists:get_value(details, Props, false)},
-                   sync           = proplists:get_value(sync, Props, true),
-                   sync_timeout   = proplists:get_value(sync_timeout, Props, 0),
-                   max_batch_size = proplists:get_value(max_batch_size, Props, 20)
+init([Opts]) ->
+    State = #state{authority      = proplists:get_value(authority, Opts, "127.0.0.1:4242"),
+                   summary        = {present, proplists:get_value(summary, Opts, true)},
+                   details        = {present, proplists:get_value(details, Opts, false)},
+                   sync           = proplists:get_value(sync, Opts, true),
+                   sync_timeout   = proplists:get_value(sync_timeout, Opts, 0),
+                   max_batch_size = proplists:get_value(max_batch_size, Opts, 20)
             },
 	{ok, State}.
 

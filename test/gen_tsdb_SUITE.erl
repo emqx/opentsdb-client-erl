@@ -8,30 +8,11 @@
 all() -> [t_put, t_async_put].
 
 init_per_suite(Config) ->
-    start_apps(gen_tsdb, {local_path("priv/gen_tsdb.schema"),
-                          local_path("etc/gen_tsdb.conf")}),
+    application:ensure_all_started(gen_tsdb),
     Config.
 
 end_per_suite(_Config) ->
-    [application:stop(App) || App <- [gen_tsdb]].
-
-get_base_dir() ->
-    {file, Here} = code:is_loaded(?MODULE),
-    filename:dirname(filename:dirname(Here)).
-
-local_path(RelativePath) ->
-    filename:join([get_base_dir(), RelativePath]).
-
-start_apps(App, {SchemaFile, ConfigFile}) ->
-    read_schema_configs(App, {SchemaFile, ConfigFile}),
-    application:ensure_all_started(App).
-
-read_schema_configs(App, {SchemaFile, ConfigFile}) ->
-    Schema = cuttlefish_schema:files([SchemaFile]),
-    Conf = conf_parse:file(ConfigFile),
-    NewConfig = cuttlefish_generator:map(Schema, Conf),
-    Vals = proplists:get_value(App, NewConfig, []),
-    [application:set_env(App, Par, Value) || {Par, Value} <- Vals].
+    application:stop(gen_tsdb).
 
 t_put(_) ->
     {ok, Pid} = gen_tsdb:start_link(),
