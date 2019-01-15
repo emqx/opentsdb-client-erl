@@ -2,15 +2,15 @@
 -behaviour(gen_server).
 
 %% API.
--export([start_link/0]).
+-export([start_link/0, start_link/1]).
 
 %% gen_server.
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, 
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
--export([put/1, put/3, put/4]).
+-export([put/2, put/4, put/5]).
 
--export([async_put/1, async_put/3, async_put/4]).
+-export([async_put/2, async_put/4, async_put/5]).
 
 -export([unix_timestamp/0, unix_timestamp/1]).
 
@@ -27,7 +27,8 @@
 -define(APP, gen_tsdb).
 
 -record(state, {
-	host = "http://127.0.0.1:4242" :: string(),
+    %% authority = host [ ":" port ]
+    authority :: string(),
 
     summary = {present, true} :: present(),
 
@@ -44,55 +45,43 @@
 
 -spec start_link() -> {ok, pid()}.
 start_link() ->
-	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    start_link("127.0.0.1:4242").
 
-%% gen_server.
+start_link(Authority) ->
+    gen_server:start_link(?MODULE, [Authority], []).
 
-init([]) ->
-    io:format("Env: ~p~n", [application:get_env(?APP, put, [])]),
-    % io:format("Env: ~p~n", [application:get_env(?APP, max_batch_size, 20)]),
-    Props = application:get_env(?APP, put, []),
-    State = #state{summary        = {present, proplists:get_value(summary, Props, true)},
-                   details        = {present, proplists:get_value(details, Props, false)},
-                   sync           = proplists:get_value(sync, Props, true),
-                   sync_timeout   = proplists:get_value(sync_timeout, Props, 0),
-                   max_batch_size = proplists:get_value(max_batch_size, Props, 20)
-            },
-    io:format("State: ~p~n", [State]),
-	{ok, State}.
+-spec(put(pid(), metric(), value(), tags()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
+put(Pid, Metric, Value, Tags) ->
+    gen_tsdb:put(Pid, make_data_point({Metric, Value, Tags})).
 
--spec(put(metric(), value(), tags()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
-put(Metric, Value, Tags) ->
-    put(make_data_point({Metric, Value, Tags})).
+-spec(put(pid(), metric(), integer(), value(), tags()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
+put(Pid, Metric, Timestamp, Value, Tags) ->
+    gen_tsdb:put(Pid, make_data_point({Metric, Timestamp, Value, Tags})).
 
--spec(put(metric(), integer(), value(), tags()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
-put(Metric, Timestamp, Value, Tags) ->
-    put(make_data_point({Metric, Timestamp, Value, Tags})).
-
--spec(put(list() | map()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
-put(DataPoints) ->
+-spec(put(pid(), list() | map()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
+put(Pid, DataPoints) ->
     try preprocess(DataPoints) of
         DataPoints1 ->
-            gen_server:call(?MODULE, {put, DataPoints1})
-    catch 
+            gen_server:call(Pid, {put, DataPoints1})
+    catch
         error : Reason ->
             {error, Reason}
     end.
 
--spec(async_put(metric(), value(), tags()) -> ok | {erro, atom()}).
-async_put(Metric, Value, Tags) ->
-    async_put(make_data_point({Metric, Value, Tags})).
+-spec(async_put(pid(), metric(), value(), tags()) -> ok | {erro, atom()}).
+async_put(Pid, Metric, Value, Tags) ->
+    async_put(Pid, make_data_point({Metric, Value, Tags})).
 
--spec(async_put(metric(), integer(), value(), tags()) -> ok | {erro, atom()}).
-async_put(Metric, Timestamp, Value, Tags) ->
-    async_put(make_data_point({Metric, Timestamp, Value, Tags})).
+-spec(async_put(pid(), metric(), integer(), value(), tags()) -> ok | {erro, atom()}).
+async_put(Pid, Metric, Timestamp, Value, Tags) ->
+    async_put(Pid, make_data_point({Metric, Timestamp, Value, Tags})).
 
--spec(async_put(list() | map()) -> ok | {erro, atom()}).
-async_put(DataPoints) ->
+-spec(async_put(pid(), list() | map()) -> ok | {erro, atom()}).
+async_put(Pid, DataPoints) ->
     try preprocess(DataPoints) of
         DataPoints1 ->
-            gen_server:cast(?MODULE, {async_put, DataPoints1})
-    catch 
+            gen_server:cast(Pid, {async_put, DataPoints1})
+    catch
         error : Reason ->
             {error, Reason}
     end.
@@ -106,6 +95,19 @@ unix_timestamp(seconds) ->
 unix_timestamp(milliseconds) ->
     {MegaSecs, Secs, MicroSecs} = erlang:timestamp(),
     MegaSecs * 1000000000 + Secs * 1000 + MicroSecs div 1000.
+
+%% gen_server.
+
+init([Authority]) ->
+    Props = application:get_env(?APP, put, []),
+    State = #state{authority      = Authority,
+                   summary        = {present, proplists:get_value(summary, Props, true)},
+                   details        = {present, proplists:get_value(details, Props, false)},
+                   sync           = proplists:get_value(sync, Props, true),
+                   sync_timeout   = proplists:get_value(sync_timeout, Props, 0),
+                   max_batch_size = proplists:get_value(max_batch_size, Props, 20)
+            },
+	{ok, State}.
 
 handle_call({put, DataPoints}, _From, State) ->
     {reply, put_(DataPoints, State), State};
@@ -153,7 +155,7 @@ preprocess(DataPoint) when is_map(DataPoint) ->
             error(Reason)
     end;
 preprocess(DataPoints) when is_list(DataPoints) ->
-    lists:map(fun(DataPoint) -> 
+    lists:map(fun(DataPoint) ->
                   preprocess(DataPoint)
               end, DataPoints).
 
@@ -201,29 +203,29 @@ run_misc_steps([Step | Steps], DataPoint) ->
             {error, Reason}
     end.
 
-put_(DataPoints, State = #state{host = Host}) ->
+put_(DataPoints, State = #state{authority = Authority}) ->
     request_api(post,
-                make_url(Host, ["api/put"], make_query_params(put, State)),
+                make_url(Authority, ["api/put"], make_query_params(put, State)),
                 jsx:encode(DataPoints)).
 
 request_api(Method, Url, Body) ->
     case httpc:request(Method, {Url, [], "application/json", Body}, [], []) of
         {error, socket_closed_remotely} ->
             {error, socket_closed_remotely};
-        {ok, {{"HTTP/1.1", Code, _}, _, ResponseBody}} 
+        {ok, {{"HTTP/1.1", Code, _}, _, ResponseBody}}
             when Code =:= 200 orelse Code =:= 204 ->
             {ok, Code, json_text_to_map(ResponseBody)};
         {ok, {{_, Code, _}, _, ResponseBody}} ->
             {error, Code, json_text_to_map(ResponseBody)}
     end.
 
-make_query_params(put, #state{summary      = Summary, 
-                              details      = Details, 
-                              sync         = Sync, 
+make_query_params(put, #state{summary      = Summary,
+                              details      = Details,
+                              sync         = Sync,
                               sync_timeout = SyncTimeout}) ->
-    make_query_params([{summary,      Summary}, 
+    make_query_params([{summary,      Summary},
                        {details,      Details},
-                       {sync,         Sync}, 
+                       {sync,         Sync},
                        {sync_timeout, SyncTimeout}]);
 make_query_params(_, _State) ->
     [].
@@ -237,14 +239,14 @@ make_query_params(Options) ->
                     QueryParams ++ [{K, V}]
                 end, [], Options).
 
-% make_url(Host, Paths) ->
-%     Host ++ "/" ++ filename:join(Paths).
-make_url(Host, Paths, QueryParams) ->
-    Host ++ "/" ++ filename:join(Paths) ++ "?" ++ serialize(QueryParams).
+% make_url(Authority, Paths) ->
+%     "http://" ++ Authority ++ "/" ++ filename:join(Paths).
+make_url(Authority, Paths, QueryParams) ->
+    "http://" ++ Authority ++ "/" ++ filename:join(Paths) ++ "?" ++ serialize(QueryParams).
 
 serialize(QueryParams) ->
     lists:foldl(fun({K, V}, String) when is_atom(K) ->
-                    Query = erlang:atom_to_list(K) ++ "=" ++ v2str(V),                                
+                    Query = erlang:atom_to_list(K) ++ "=" ++ v2str(V),
                     case String of
                         "" -> Query;
                         _ -> String ++ "&" ++ Query

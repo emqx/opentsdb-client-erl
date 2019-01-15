@@ -8,12 +8,4 @@ start_link() ->
 	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-	{ok, { {one_for_one, 10, 100}, 
-        [{
-            gen_tsdb,
-            {gen_tsdb, start_link, []},
-            permanent,
-            5000,
-            worker,
-            [gen_tsdb]
-        }]} }.
+	{ok, { {one_for_one, 10, 100}, []} }.
