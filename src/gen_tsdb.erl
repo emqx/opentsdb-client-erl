@@ -8,11 +8,13 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
--export([put/2, put/4, put/5]).
+-export([put/2, put/3, put/4, put/5]).
 
--export([async_put/2, async_put/4, async_put/5]).
+-export([async_put/2, async_put/3, async_put/4, async_put/5]).
 
 -export([unix_timestamp/0, unix_timestamp/1]).
+
+-type(url() :: string()).
 
 -type(present() :: {present, boolean()}).
 
@@ -27,8 +29,7 @@
 -define(APP, gen_tsdb).
 
 -record(state, {
-    %% authority = host [ ":" port ]
-    authority :: string(),
+    url :: string(),
 
     summary = {present, true} :: present(),
 
@@ -58,11 +59,14 @@ put(Pid, Metric, Value, Tags) ->
 put(Pid, Metric, Timestamp, Value, Tags) ->
     gen_tsdb:put(Pid, make_data_point({Metric, Timestamp, Value, Tags})).
 
--spec(put(pid(), list() | map()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
 put(Pid, DataPoints) ->
+    put(Pid, undefined, DataPoints).
+
+-spec(put(pid(), url() | undefined, list() | map()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
+put(Pid, Url, DataPoints) ->
     try preprocess(DataPoints) of
         DataPoints1 ->
-            gen_server:call(Pid, {put, DataPoints1})
+            gen_server:call(Pid, {put, Url, DataPoints1})
     catch
         error : Reason ->
             {error, Reason}
@@ -76,11 +80,14 @@ async_put(Pid, Metric, Value, Tags) ->
 async_put(Pid, Metric, Timestamp, Value, Tags) ->
     async_put(Pid, make_data_point({Metric, Timestamp, Value, Tags})).
 
--spec(async_put(pid(), list() | map()) -> ok | {erro, atom()}).
 async_put(Pid, DataPoints) ->
+    async_put(Pid, undefined, DataPoints).
+
+-spec(async_put(pid(), url() | undefined, list() | map()) -> ok | {erro, atom()}).
+async_put(Pid, Url, DataPoints) ->
     try preprocess(DataPoints) of
         DataPoints1 ->
-            gen_server:cast(Pid, {async_put, DataPoints1})
+            gen_server:cast(Pid, {async_put, Url, DataPoints1})
     catch
         error : Reason ->
             {error, Reason}
@@ -99,28 +106,28 @@ unix_timestamp(milliseconds) ->
 %% gen_server.
 
 init([Opts]) ->
-    State = #state{authority      = proplists:get_value(authority, Opts, "127.0.0.1:4242"),
+    State = #state{url            = proplists:get_value(url, Opts, "http://127.0.0.1:4242"),
                    summary        = {present, proplists:get_value(summary, Opts, true)},
                    details        = {present, proplists:get_value(details, Opts, false)},
-                   sync           = proplists:get_value(sync, Opts, true),
-                   sync_timeout   = proplists:get_value(sync_timeout, Opts, 0),
+                   sync           = true,
+                   sync_timeout   = 0,
                    max_batch_size = proplists:get_value(max_batch_size, Opts, 20)
             },
 	{ok, State}.
 
-handle_call({put, DataPoints}, _From, State) ->
-    {reply, put_(DataPoints, State), State};
+handle_call({put, Url, DataPoints}, _From, State) ->
+    {reply, put_(Url, DataPoints, State), State};
 handle_call(_Request, _From, State) ->
 	{reply, ignored, State}.
 
-handle_cast({async_put, DataPoints}, State = #state{max_batch_size = MaxBatchSize}) ->
+handle_cast({async_put, Url, DataPoints}, State = #state{max_batch_size = MaxBatchSize}) ->
     DataPoints1 = case DataPoints of
                       DataPoint when is_map(DataPoint) ->
                           [DataPoint];
                       _ when is_list(DataPoints) ->
                           DataPoints
                   end ++ drain_put(MaxBatchSize, []),
-    put_(DataPoints1, State),
+    put_(Url, DataPoints1, State),
     {noreply, State};
 handle_cast(_Msg, State) ->
 	{noreply, State}.
@@ -202,9 +209,11 @@ run_misc_steps([Step | Steps], DataPoint) ->
             {error, Reason}
     end.
 
-put_(DataPoints, State = #state{authority = Authority}) ->
+put_(undefined, DataPoints, State = #state{url = Url}) ->
+    put_(Url, DataPoints, State);
+put_(Url, DataPoints, State) ->
     request_api(post,
-                make_url(Authority, ["api/put"], make_query_params(put, State)),
+                make_url(Url, ["api/put"], make_query_params(put, State)),
                 jsx:encode(DataPoints)).
 
 request_api(Method, Url, Body) ->
@@ -238,10 +247,12 @@ make_query_params(Options) ->
                     QueryParams ++ [{K, V}]
                 end, [], Options).
 
-% make_url(Authority, Paths) ->
-%     "http://" ++ Authority ++ "/" ++ filename:join(Paths).
-make_url(Authority, Paths, QueryParams) ->
-    "http://" ++ Authority ++ "/" ++ filename:join(Paths) ++ "?" ++ serialize(QueryParams).
+make_url(Url, Paths, QueryParams) ->
+    case list_to_binary(Url) of
+        <<"http://", _/binary>> -> Url;
+        <<"https://", _/binary>> -> Url;
+        _ -> "http://" ++ Url
+    end ++ "/" ++ filename:join(Paths) ++ "?" ++ serialize(QueryParams).
 
 serialize(QueryParams) ->
     lists:foldl(fun({K, V}, String) when is_atom(K) ->
