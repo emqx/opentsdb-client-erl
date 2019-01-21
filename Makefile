@@ -2,10 +2,9 @@ PROJECT = gen_tsdb
 PROJECT_DESCRIPTION = New project
 PROJECT_VERSION = 0.1.0
 
-DEPS = jsx
+DEPS = jsx hackney
 dep_jsx = git https://github.com/talentdeficit/jsx v2.9.0
-
-LOCAL_DEPS = inets
+dep_hackney = git https://github.com/benoitc/hackney
 
 COVER = true
 

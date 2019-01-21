@@ -212,19 +212,26 @@ run_misc_steps([Step | Steps], DataPoint) ->
 put_(undefined, DataPoints, State = #state{url = Url}) ->
     put_(Url, DataPoints, State);
 put_(Url, DataPoints, State) ->
-    request_api(post,
-                make_url(Url, ["api/put"], make_query_params(put, State)),
-                jsx:encode(DataPoints)).
+    http_request(post,
+                 make_url(Url, ["api/put"], make_query_params(put, State)),
+                 jsx:encode(DataPoints)).
 
-request_api(Method, Url, Body) ->
-    case httpc:request(Method, {Url, [], "application/json", Body}, [], []) of
-        {error, socket_closed_remotely} ->
-            {error, socket_closed_remotely};
-        {ok, {{"HTTP/1.1", Code, _}, _, ResponseBody}}
-            when Code =:= 200 orelse Code =:= 204 ->
-            {ok, Code, json_text_to_map(ResponseBody)};
-        {ok, {{_, Code, _}, _, ResponseBody}} ->
-            {error, Code, json_text_to_map(ResponseBody)}
+http_request(Method, Url, Payload) ->
+    Headers = [{<<"Content-Type">>, <<"application/json">>}],
+    Options = [{pool, default}],
+    case hackney:request(Method, Url, Headers, Payload, Options) of
+        {ok, StatusCode, _, Ref} ->
+            case hackney:body(Ref) of
+                {ok, ResponseBody}
+                    when StatusCode =:= 200 orelse StatusCode =:= 204 ->
+                    {ok, StatusCode, json_text_to_map(ResponseBody)};
+                {ok, ResponseBody} ->
+                    {error, {StatusCode, json_text_to_map(ResponseBody)}};
+                {error, Reason} -> 
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 make_query_params(put, #state{summary      = Summary,
@@ -273,10 +280,15 @@ v2str(V) when is_atom(V) ->
 v2str(V) when is_integer(V) ->
     erlang:integer_to_list(V).
 
-json_text_to_map("") ->
-    #{};
 json_text_to_map(JsonText) when is_list(JsonText) ->
-    jsx:decode(list_to_binary(JsonText), [return_maps]).
+    json_text_to_map(list_to_binary(JsonText));
+json_text_to_map(JsonText) when is_binary(JsonText) ->
+    case jsx:is_json(JsonText) of
+        false ->
+            #{};
+        true ->
+            jsx:decode(JsonText, [return_maps])
+    end.
 
 drain_put(0, Acc) ->
     Acc;
