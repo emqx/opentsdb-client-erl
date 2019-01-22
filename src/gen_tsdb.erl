@@ -218,18 +218,18 @@ put_(Url, DataPoints, State) ->
 
 http_request(Method, Url, Payload) ->
     Headers = [{<<"Content-Type">>, <<"application/json">>}],
-    Options = [{pool, default}],
+    Options = [{pool, default},
+               {connect_timeout, 10000},
+               {recv_timeout, 30000},
+               {follow_redirectm, true},
+               {max_redirect, 5},
+               with_body],
     case hackney:request(Method, Url, Headers, Payload, Options) of
-        {ok, StatusCode, _, Ref} ->
-            case hackney:body(Ref) of
-                {ok, ResponseBody}
-                    when StatusCode =:= 200 orelse StatusCode =:= 204 ->
-                    {ok, StatusCode, json_text_to_map(ResponseBody)};
-                {ok, ResponseBody} ->
-                    {error, {StatusCode, json_text_to_map(ResponseBody)}};
-                {error, Reason} -> 
-                    {error, Reason}
-            end;
+        {ok, StatusCode, _Headers, ResponseBody}
+          when StatusCode =:= 200 orelse StatusCode =:= 204 ->
+            {ok, StatusCode, json_text_to_map(ResponseBody)};
+        {ok, StatusCode, _Headers, ResponseBody} ->
+            {error, {StatusCode, json_text_to_map(ResponseBody)}};
         {error, Reason} ->
             {error, Reason}
     end.
