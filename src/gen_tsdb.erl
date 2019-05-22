@@ -8,13 +8,13 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
--export([put/2, put/3, put/4, put/5]).
+-export([put/2, put/3]).
 
--export([async_put/2, async_put/3, async_put/4, async_put/5]).
+-export([async_put/2, async_put/3]).
 
 -export([unix_timestamp/0, unix_timestamp/1]).
 
--type(url() :: string()).
+-type(server() :: string()).
 
 -type(present() :: {present, boolean()}).
 
@@ -22,20 +22,26 @@
 
 -type(metric() :: binary() | atom()).
 
--type(value() :: integer() | float()).
+-type(timestamp() :: integer()).
+
+-type(value() :: integer() | float() | binary()).
 
 -type(tags() :: map()).
 
 -define(APP, gen_tsdb).
 
+-define(default_server, "localhost:4242").
+-define(default_sync_timeout, 0).
+-define(default_max_batch_size, 20).
+
 -record(state, {
-    url :: string(),
+    server = ?default_server :: server(),
 
     summary = {present, true} :: present(),
 
     details = {present, false} :: present(),
 
-    sync = true :: boolean(),
+    sync = {present, false} :: present(),
 
     sync_timeout = 0 :: milliseconds(),
 
@@ -51,43 +57,66 @@ start_link() ->
 start_link(Opts) ->
     gen_server:start_link(?MODULE, [Opts], []).
 
--spec(put(pid(), metric(), value(), tags()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
-put(Pid, Metric, Value, Tags) ->
-    gen_tsdb:put(Pid, make_data_point({Metric, Value, Tags})).
-
--spec(put(pid(), metric(), integer(), value(), tags()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
-put(Pid, Metric, Timestamp, Value, Tags) ->
-    gen_tsdb:put(Pid, make_data_point({Metric, Timestamp, Value, Tags})).
-
+-spec(put(Pid, DataPoints) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}
+    when Pid :: pid(),
+         DataPoints :: [DataPoint] | DataPoint,
+         DataPoint :: #{metric := metric(),
+                        timestamp => timestamp(),
+                        value := value(),
+                        tags := tags()}).
 put(Pid, DataPoints) ->
-    put(Pid, undefined, DataPoints).
+    put(Pid, DataPoints, []).
 
--spec(put(pid(), url() | undefined, list() | map()) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}).
-put(Pid, Url, DataPoints) ->
+-spec(put(Pid, DataPoints, Options) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}
+    when Pid :: pid(),
+         DataPoints :: [DataPoint] | DataPoint,
+         DataPoint :: #{metric := metric(),
+                        timestamp => timestamp(),
+                        value := value(),
+                        tags := tags()},
+         Options :: [Option],
+         Option :: {server, server()} | 
+                   {summary, present()} |
+                   {details, present()} |
+                   {sync, present()} |
+                   {sync_timeout, milliseconds()}).
+put(Pid, DataPoints, Options) ->
     try preprocess(DataPoints) of
         DataPoints1 ->
-            gen_server:call(Pid, {put, Url, DataPoints1})
+            gen_server:call(Pid, {put, DataPoints1, Options})
     catch
         error : Reason ->
             {error, Reason}
     end.
 
--spec(async_put(pid(), metric(), value(), tags()) -> ok | {erro, atom()}).
-async_put(Pid, Metric, Value, Tags) ->
-    async_put(Pid, make_data_point({Metric, Value, Tags})).
-
--spec(async_put(pid(), metric(), integer(), value(), tags()) -> ok | {erro, atom()}).
-async_put(Pid, Metric, Timestamp, Value, Tags) ->
-    async_put(Pid, make_data_point({Metric, Timestamp, Value, Tags})).
-
+-spec(async_put(Pid, DataPoints) -> ok | {erro, atom()}
+    when Pid :: pid(),
+         DataPoints :: [DataPoint] | DataPoint,
+         DataPoint :: #{metric := metric(),
+                        timestamp => timestamp(),
+                        value := value(),
+                        tags := tags()}).
 async_put(Pid, DataPoints) ->
-    async_put(Pid, undefined, DataPoints).
+    async_put(Pid, DataPoints, []).
 
--spec(async_put(pid(), url() | undefined, list() | map()) -> ok | {erro, atom()}).
-async_put(Pid, Url, DataPoints) ->
+-spec(async_put(Pid, DataPoints, Options) -> ok | {erro, atom()}
+    when Pid :: pid(),
+         DataPoints :: [DataPoint] | DataPoint,
+         DataPoint :: #{metric := metric(),
+                        timestamp => timestamp(),
+                        value := value(),
+                        tags := tags()},
+         Options :: [Option],
+         Option :: {server, server()} | 
+                   {summary, present()} |
+                   {details, present()} |
+                   {sync, present()} |
+                   {sync_timeout, milliseconds()} |
+                   {max_batch_size, integer()}).
+async_put(Pid, DataPoints, Options) ->
     try preprocess(DataPoints) of
         DataPoints1 ->
-            gen_server:cast(Pid, {async_put, Url, DataPoints1})
+            gen_server:cast(Pid, {async_put, DataPoints1, Options})
     catch
         error : Reason ->
             {error, Reason}
@@ -106,28 +135,30 @@ unix_timestamp(milliseconds) ->
 %% gen_server.
 
 init([Opts]) ->
-    State = #state{url            = proplists:get_value(url, Opts, "http://127.0.0.1:4242"),
+    State = #state{server         = proplists:get_value(server, Opts, ?default_server),
                    summary        = {present, proplists:get_value(summary, Opts, true)},
                    details        = {present, proplists:get_value(details, Opts, false)},
-                   sync           = true,
-                   sync_timeout   = 0,
-                   max_batch_size = proplists:get_value(max_batch_size, Opts, 20)
+                   sync           = {present, proplists:get_value(details, Opts, true)},
+                   sync_timeout   = proplists:get_value(sync_timeout, Opts, ?default_sync_timeout),
+                   max_batch_size = proplists:get_value(max_batch_size, Opts, ?default_max_batch_size)
             },
 	{ok, State}.
 
-handle_call({put, Url, DataPoints}, _From, State) ->
-    {reply, put_(Url, DataPoints, State), State};
+handle_call({put, DataPoints, Options}, _From, State) ->
+    {reply, put_(DataPoints, Options, State), State};
 handle_call(_Request, _From, State) ->
 	{reply, ignored, State}.
 
-handle_cast({async_put, Url, DataPoints}, State = #state{max_batch_size = MaxBatchSize}) ->
+handle_cast({async_put, DataPoints, Options}, State = #state{max_batch_size = MaxBatchSize}) ->
+    MaxBatchSize1 = proplists:get_value(max_batch_size, Options, MaxBatchSize),
     DataPoints1 = case DataPoints of
                       DataPoint when is_map(DataPoint) ->
                           [DataPoint];
                       _ when is_list(DataPoints) ->
                           DataPoints
-                  end ++ drain_put(MaxBatchSize, []),
-    put_(Url, DataPoints1, State),
+                  end ++ drain_put(MaxBatchSize1, []),
+    Options1 = lists:keystore(sync, 1, Options, {sync, {present, false}}),
+    put_(DataPoints1, Options1, State),
     {noreply, State};
 handle_cast(_Msg, State) ->
 	{noreply, State}.
@@ -145,16 +176,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%====================================================================
 
-make_data_point({Metric, Value, Tags}) ->
-    #{metric => Metric, value => Value, tags => Tags};
-make_data_point({Metric, Timestamp, Value, Tags}) ->
-    #{metric => Metric, timestamp => Timestamp, value => Value, tags => Tags}.
-
 preprocess(DataPoint) when is_map(DataPoint) ->
-    case run_misc_steps([fun check_metric/1,
-                         fun preprocess_timestamp/1,
-                         fun check_value/1,
-                         fun check_tags/1], DataPoint) of
+    case run_misc_steps([fun may_add_timestamp/1], DataPoint) of
         {ok, DataPoint1} ->
             DataPoint1;
         {error, Reason} ->
@@ -165,37 +188,10 @@ preprocess(DataPoints) when is_list(DataPoints) ->
                   preprocess(DataPoint)
               end, DataPoints).
 
-
-check_metric(#{metric := Metric}) when is_binary(Metric) orelse is_atom(Metric) ->
+may_add_timestamp(#{timestamp := _Timestamp}) ->
 	ok;
-check_metric(#{metric := _Metric}) ->
-	{error, bad_metric};
-check_metric(_) ->
-    {error, missing_metric}.
-
-preprocess_timestamp(#{timestamp := Timestamp}) when is_integer(Timestamp) orelse is_binary(Timestamp) ->
-	ok;
-preprocess_timestamp(#{timestamp := _Timestamp}) ->
-    {error, bad_timestamp};
-preprocess_timestamp(DataPoint) ->
+may_add_timestamp(DataPoint) ->
     {ok, DataPoint#{timestamp => unix_timestamp()}}.
-
-check_value(#{value := Value}) when is_number(Value) orelse is_binary(Value) ->
-    ok;
-check_value(#{value := _}) ->
-    {error, bad_value};
-check_value(_) ->
-    {error, missing_value}.
-
-check_tags(#{tags := Tags}) when is_map(Tags) ->
-    case maps:size(Tags) of
-        0 -> {error, missing_tag};
-        _ -> ok
-    end;
-check_tags(#{tags := _}) ->
-    {error, bad_tags};
-check_tags(_) ->
-    {error, missing_tag}.
 
 run_misc_steps([], DataPoint) ->
     {ok, DataPoint};
@@ -209,14 +205,28 @@ run_misc_steps([Step | Steps], DataPoint) ->
             {error, Reason}
     end.
 
-put_(undefined, DataPoints, State = #state{url = Url}) ->
-    put_(Url, DataPoints, State);
-put_(Url, DataPoints, State) ->
+put_(DataPoints, Options0, #state{server = Server0,
+                                  summary = Summary0,
+                                  details = Details0,
+                                  sync = Sync0,
+                                  sync_timeout = SyncTimeout0}) ->
+    Server = proplists:get_value(server, Options0, Server0),
+    Sync = proplists:get_value(sync, Options0, Sync0),
+    Options = [{summary, proplists:get_value(summary, Options0, Summary0)},
+               {details, proplists:get_value(details, Options0, Details0)},
+               {sync, Sync}],
+    Options1 = 
+        case Sync of
+            {present, true} ->
+                [{sync_timeout, proplists:get_value(sync_timeout, Options0, SyncTimeout0)} | Options];
+            {present, false} ->
+                Options
+        end,
     http_request(post,
-                 make_url(Url, ["api/put"], make_query_params(put, State)),
-                 jsx:encode(DataPoints)).
+                make_uri(Server, ["api/put"], make_query_params(Options1)),
+                jsx:encode(DataPoints)).
 
-http_request(Method, Url, Payload) ->
+http_request(Method, Server, Payload) ->
     Headers = [{<<"Content-Type">>, <<"application/json">>}],
     Options = [{pool, default},
                {connect_timeout, 10000},
@@ -224,26 +234,15 @@ http_request(Method, Url, Payload) ->
                {follow_redirectm, true},
                {max_redirect, 5},
                with_body],
-    case hackney:request(Method, Url, Headers, Payload, Options) of
+    case hackney:request(Method, Server, Headers, Payload, Options) of
         {ok, StatusCode, _Headers, ResponseBody}
           when StatusCode =:= 200 orelse StatusCode =:= 204 ->
             {ok, StatusCode, json_text_to_map(ResponseBody)};
         {ok, StatusCode, _Headers, ResponseBody} ->
-            {error, {StatusCode, json_text_to_map(ResponseBody)}};
+            {error, StatusCode, json_text_to_map(ResponseBody)};
         {error, Reason} ->
             {error, Reason}
     end.
-
-make_query_params(put, #state{summary      = Summary,
-                              details      = Details,
-                              sync         = Sync,
-                              sync_timeout = SyncTimeout}) ->
-    make_query_params([{summary,      Summary},
-                       {details,      Details},
-                       {sync,         Sync},
-                       {sync_timeout, SyncTimeout}]);
-make_query_params(_, _State) ->
-    [].
 
 make_query_params(Options) ->
     lists:foldl(fun({Flag, {present, true}}, QueryParams) ->
@@ -254,11 +253,11 @@ make_query_params(Options) ->
                     QueryParams ++ [{K, V}]
                 end, [], Options).
 
-make_url(Url, Paths, QueryParams) ->
-    case list_to_binary(Url) of
-        <<"http://", _/binary>> -> Url;
-        <<"https://", _/binary>> -> Url;
-        _ -> "http://" ++ Url
+make_uri(Server, Paths, QueryParams) ->
+    case list_to_binary(Server) of
+        <<"http://", _/binary>> -> Server;
+        <<"https://", _/binary>> -> Server;
+        _ -> "http://" ++ Server
     end ++ "/" ++ filename:join(Paths) ++ "?" ++ serialize(QueryParams).
 
 serialize(QueryParams) ->
@@ -287,7 +286,7 @@ json_text_to_map(JsonText) when is_binary(JsonText) ->
         false ->
             #{};
         true ->
-            jsx:decode(JsonText, [return_maps])
+            jsx:decode(JsonText, [return_maps, {labels, atom}])
     end.
 
 drain_put(0, Acc) ->
