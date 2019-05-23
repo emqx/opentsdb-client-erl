@@ -1,11 +1,26 @@
-PROJECT = gen_tsdb
-PROJECT_DESCRIPTION = New project
-PROJECT_VERSION = 0.1.0
+## shallow clone for speed
 
-DEPS = jsx hackney
-dep_jsx = git https://github.com/talentdeficit/jsx v2.9.0
-dep_hackney = git https://github.com/benoitc/hackney
+REBAR_GIT_CLONE_OPTIONS += --depth 1
+export REBAR_GIT_CLONE_OPTIONS
 
-COVER = true
+REBAR = rebar3
+all: compile
 
-include erlang.mk
+compile:
+	$(REBAR) compile
+
+ct: compile
+	$(REBAR) as test ct -v
+
+eunit: compile
+	$(REBAR) as test eunit
+
+xref:
+	$(REBAR) xref
+
+clean: distclean
+
+distclean:
+	@rm -rf _build cover deps logs log data
+	@rm -rf rebar.lock compile_commands.json
+	@rm -rf rebar3.crashdump

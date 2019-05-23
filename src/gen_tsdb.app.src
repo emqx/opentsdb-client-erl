@@ -1,0 +1,7 @@
+{application,gen_tsdb,
+             [{description,"TSDB Client"},
+              {vsn,"git"},
+              {modules,[]},
+              {registered,[gen_tsdb_sup]},
+              {applications,[kernel,stdlib,jsx,hackney]},
+              {mod,{gen_tsdb_app,[]}}]}.
