@@ -6,7 +6,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> [t_put, t_async_put].
+all() -> [t_put].
 
 init_per_suite(Config) ->
     application:ensure_all_started(gen_tsdb),
@@ -36,13 +36,4 @@ t_put(_) ->
                                       {summary, {present, false}}]),
     {error, 400, _} = gen_tsdb:put(Pid, #{metric => <<"sys.cpu.nice">>,
                                           value => <<"20a">>,
-                                          tags => #{host => web01}}).    
-
-t_async_put(_) ->
-    {ok, Pid} = gen_tsdb:start_link(),
-    ok = gen_tsdb:async_put(Pid, [#{metric => <<"sys.cpu.nice">>,
-                                    value => 20,
-                                    tags => #{city => hangzhou}},
-                                  #{metric => <<"sys.cpu.nice">>,
-                                    value => 21,
-                                    tags => #{city => kunming}}]).
+                                          tags => #{host => web01}}).

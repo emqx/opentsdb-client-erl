@@ -10,8 +10,6 @@
 
 -export([put/2, put/3]).
 
--export([async_put/2, async_put/3]).
-
 -export([unix_timestamp/0, unix_timestamp/1]).
 
 -type(server() :: string()).
@@ -79,44 +77,12 @@ put(Pid, DataPoints) ->
                    {summary, present()} |
                    {details, present()} |
                    {sync, present()} |
-                   {sync_timeout, milliseconds()}).
+                   {sync_timeout, milliseconds()} |
+                   {max_batch_size, integer()}).
 put(Pid, DataPoints, Options) ->
     try preprocess(DataPoints) of
         DataPoints1 ->
             gen_server:call(Pid, {put, DataPoints1, Options})
-    catch
-        error : Reason ->
-            {error, Reason}
-    end.
-
--spec(async_put(Pid, DataPoints) -> ok | {erro, atom()}
-    when Pid :: pid(),
-         DataPoints :: [DataPoint] | DataPoint,
-         DataPoint :: #{metric := metric(),
-                        timestamp => timestamp(),
-                        value := value(),
-                        tags := tags()}).
-async_put(Pid, DataPoints) ->
-    async_put(Pid, DataPoints, []).
-
--spec(async_put(Pid, DataPoints, Options) -> ok | {erro, atom()}
-    when Pid :: pid(),
-         DataPoints :: [DataPoint] | DataPoint,
-         DataPoint :: #{metric := metric(),
-                        timestamp => timestamp(),
-                        value := value(),
-                        tags := tags()},
-         Options :: [Option],
-         Option :: {server, server()} | 
-                   {summary, present()} |
-                   {details, present()} |
-                   {sync, present()} |
-                   {sync_timeout, milliseconds()} |
-                   {max_batch_size, integer()}).
-async_put(Pid, DataPoints, Options) ->
-    try preprocess(DataPoints) of
-        DataPoints1 ->
-            gen_server:cast(Pid, {async_put, DataPoints1, Options})
     catch
         error : Reason ->
             {error, Reason}
@@ -138,28 +104,29 @@ init([Opts]) ->
     State = #state{server         = proplists:get_value(server, Opts, ?default_server),
                    summary        = {present, proplists:get_value(summary, Opts, true)},
                    details        = {present, proplists:get_value(details, Opts, false)},
-                   sync           = {present, proplists:get_value(details, Opts, true)},
+                   sync           = {present, proplists:get_value(sync, Opts, true)},
                    sync_timeout   = proplists:get_value(sync_timeout, Opts, ?default_sync_timeout),
                    max_batch_size = proplists:get_value(max_batch_size, Opts, ?default_max_batch_size)
             },
 	{ok, State}.
 
-handle_call({put, DataPoints, Options}, _From, State) ->
-    {reply, put_(DataPoints, Options, State), State};
+handle_call({put, DataPoints, Options}, _From, State = #state{sync = Sync, max_batch_size = MaxBatchSize}) ->
+    case proplists:get_value(sync, Options, Sync) of
+        {present, true} ->
+            {reply, put_(DataPoints, Options, State), State};
+        {present, false} ->
+            MaxBatchSize1 = proplists:get_value(max_batch_size, Options, MaxBatchSize),
+            DataPoints1 = case DataPoints of
+                            DataPoint when is_map(DataPoint) ->
+                                [DataPoint];
+                            _ when is_list(DataPoints) ->
+                                DataPoints
+                        end ++ drain_put(MaxBatchSize1, []),
+            {reply, put_(DataPoints1, Options, State), State}
+    end;
 handle_call(_Request, _From, State) ->
 	{reply, ignored, State}.
 
-handle_cast({async_put, DataPoints, Options}, State = #state{max_batch_size = MaxBatchSize}) ->
-    MaxBatchSize1 = proplists:get_value(max_batch_size, Options, MaxBatchSize),
-    DataPoints1 = case DataPoints of
-                      DataPoint when is_map(DataPoint) ->
-                          [DataPoint];
-                      _ when is_list(DataPoints) ->
-                          DataPoints
-                  end ++ drain_put(MaxBatchSize1, []),
-    Options1 = lists:keystore(sync, 1, Options, {sync, {present, false}}),
-    put_(DataPoints1, Options1, State),
-    {noreply, State};
 handle_cast(_Msg, State) ->
 	{noreply, State}.
 
