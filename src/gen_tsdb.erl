@@ -79,8 +79,10 @@ put(Pid, DataPoints) ->
                    {sync, present()} |
                    {sync_timeout, milliseconds()} |
                    {max_batch_size, integer()}).
-put(Pid, DataPoints, Options) ->
-    try preprocess(DataPoints) of
+put(Pid, DataPoint, Options) when is_map(DataPoint) ->
+    put(Pid, [DataPoint], Options);
+put(Pid, DataPoints, Options) when is_list(DataPoints) ->
+    try preprocess([atom_key_map(Point) || Point <- DataPoints]) of
         DataPoints1 ->
             gen_server:call(Pid, {put, DataPoints1, Options})
     catch
@@ -89,7 +91,7 @@ put(Pid, DataPoints, Options) ->
     end.
 
 unix_timestamp() ->
-    unix_timestamp(seconds).
+    unix_timestamp(milliseconds).
 
 unix_timestamp(seconds) ->
     {MegaSecs, Secs, _MicroSecs} = erlang:timestamp(),
@@ -155,8 +157,14 @@ preprocess(DataPoints) when is_list(DataPoints) ->
                   preprocess(DataPoint)
               end, DataPoints).
 
-may_add_timestamp(#{timestamp := _Timestamp}) ->
-	ok;
+may_add_timestamp(#{timestamp := Timestamp}) when is_integer(Timestamp) ->
+    ok;
+may_add_timestamp(DataPoint = #{timestamp := Timestamp}) when is_binary(Timestamp) ->
+	try erlang:binary_to_integer(Timestamp) of
+        Timestamp1 -> {ok, DataPoint#{timestamp => Timestamp1}}
+    catch
+        error:_Reason -> {ok, DataPoint#{timestamp => unix_timestamp()}}
+    end;
 may_add_timestamp(DataPoint) ->
     {ok, DataPoint#{timestamp => unix_timestamp()}}.
 
@@ -267,3 +275,8 @@ drain_put(Cnt, Acc) ->
     after 0 ->
         Acc
     end.
+
+atom_key_map(BinKeyMap) when is_map(BinKeyMap) ->
+    maps:fold(fun(K, V, Acc) ->
+            Acc#{binary_to_atom(K, utf8) => V}
+        end, #{}, BinKeyMap).
