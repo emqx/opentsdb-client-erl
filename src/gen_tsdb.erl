@@ -277,6 +277,8 @@ drain_put(Cnt, Acc) ->
     end.
 
 atom_key_map(BinKeyMap) when is_map(BinKeyMap) ->
-    maps:fold(fun(K, V, Acc) ->
-            Acc#{binary_to_atom(K, utf8) => V}
-        end, #{}, BinKeyMap).
+    maps:fold(fun(K, V, Acc) when is_binary(K) ->
+                  Acc#{binary_to_atom(K, utf8) => V};
+                 (K, V, Acc) ->
+                  Acc#{K => V}
+              end, #{}, BinKeyMap).
