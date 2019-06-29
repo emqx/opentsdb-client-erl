@@ -2,15 +2,29 @@
 -behaviour(gen_server).
 
 %% API.
--export([start_link/0, start_link/1]).
+-export([ start_link/0
+        , start_link/1
+        , stop/1
+        ]).
 
 %% gen_server.
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3]).
+-export([ init/1
+        , handle_call/3
+        , handle_cast/2
+        , handle_info/2
+        , terminate/2
+        , code_change/3
+        ]).
 
--export([put/2, put/3]).
+-export([ put/2
+        , put/3
+        , version/1
+        , version/2
+        ]).
 
--export([unix_timestamp/0, unix_timestamp/1]).
+-export([ unix_timestamp/0
+        , unix_timestamp/1
+        ]).
 
 -type(server() :: string()).
 
@@ -55,6 +69,9 @@ start_link() ->
 start_link(Opts) ->
     gen_server:start_link(?MODULE, [Opts], []).
 
+stop(Pid) ->
+    gen_server:stop(Pid).
+
 -spec(put(Pid, DataPoints) -> {ok, integer(), map()} | {erro, atom()} | {error, integer(), map()}
     when Pid :: pid(),
          DataPoints :: [DataPoint] | DataPoint,
@@ -89,6 +106,12 @@ put(Pid, DataPoints, Options) when is_list(DataPoints) ->
         error : Reason ->
             {error, Reason}
     end.
+
+version(Pid) ->
+    version(Pid, []).
+
+version(Pid, Options) ->
+    gen_server:call(Pid, {version, Options}).
 
 unix_timestamp() ->
     unix_timestamp(milliseconds).
@@ -126,6 +149,9 @@ handle_call({put, DataPoints, Options}, _From, State = #state{sync = Sync, max_b
                         end ++ drain_put(MaxBatchSize1, []),
             {reply, put_(DataPoints1, Options, State), State}
     end;
+handle_call({version, Options}, _From, State = #state{server = Server0}) ->
+    Server = proplists:get_value(server, Options, Server0),
+    {reply, http_request(get, make_uri(Server, ["api/version"], []), <<>>), State};
 handle_call(_Request, _From, State) ->
 	{reply, ignored, State}.
 
