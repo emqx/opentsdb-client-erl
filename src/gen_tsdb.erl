@@ -240,7 +240,7 @@ http_request(Method, Server, Payload) ->
           when StatusCode =:= 200 orelse StatusCode =:= 204 ->
             {ok, StatusCode, json_text_to_map(ResponseBody)};
         {ok, StatusCode, _Headers, ResponseBody} ->
-            {error, StatusCode, json_text_to_map(ResponseBody)};
+            {error, {StatusCode, json_text_to_map(ResponseBody)}};
         {error, Reason} ->
             {error, Reason}
     end.
