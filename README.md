@@ -1,7 +1,7 @@
 
-# erlang-opentsdb-client
+# opentsdb-client-erl
 
-**erlang-opentsdb-client** is an client which connects and pushes metrics to opentsdb server. 
+**opentsdb-client-erl** is an client which connects and pushes metrics to opentsdb server. 
 
 Both synchronous and asynchronous modes of operation are supported. 
 
@@ -11,13 +11,13 @@ We will support more methods in opentsdb and more kinds of tsdb soon.
 
 ## Basic usage
 
-### Start erlang-opentsdb-client
+### Start opentsdb-client-erl
 
 To start in the console run:
 
 `$ erl -pa ebin -pa deps/*/ebin`
 
-To start erlang-opentsdb-client:
+To start opentsdb-client-erl:
 
 ```erlang
 Opts = [{url, "http://127.0.0.1:4242"},
