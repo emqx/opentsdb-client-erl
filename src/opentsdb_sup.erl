@@ -1,4 +1,4 @@
--module(gen_tsdb_sup).
+-module(opentsdb_sup).
 -behaviour(supervisor).
 
 -export([start_link/0]).

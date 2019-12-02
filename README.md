@@ -1,7 +1,7 @@
 
 # erlang-opentsdb-client
 
-**gen_tsdb** is an client which connects and pushes metrics to opentsdb server. 
+**erlang-opentsdb-client** is an client which connects and pushes metrics to opentsdb server. 
 
 Both synchronous and asynchronous modes of operation are supported. 
 
@@ -20,12 +20,11 @@ To start in the console run:
 To start erlang-opentsdb-client:
 
 ```erlang
-application:ensure_all_started(erlang_opentsdb_client).
 Opts = [{url, "http://127.0.0.1:4242"},
 		{summary, true},
 		{details, false},
 		{max_batch_size, 20}]
-{ok, Pid} = gen_tsdb:start_link(Opts).
+{ok, Pid} = opentsdb:start_link(Opts).
 ```
 
 
