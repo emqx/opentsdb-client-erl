@@ -1,4 +1,4 @@
--module(gen_tsdb).
+-module(opentsdb).
 -behaviour(gen_server).
 
 %% API.
@@ -40,7 +40,7 @@
 
 -type(tags() :: map()).
 
--define(APP, gen_tsdb).
+-define(APP, opentsdb).
 
 -define(default_server, "localhost:4242").
 -define(default_sync_timeout, 0).

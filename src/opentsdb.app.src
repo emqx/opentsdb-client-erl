@@ -1,0 +1,7 @@
+{application,opentsdb,
+             [{description,"OpenTSDB Client"},
+              {vsn,"git"},
+              {modules,[]},
+              {registered,[opentsdb_sup]},
+              {applications,[kernel,stdlib,jsx,hackney]},
+              {mod,{opentsdb_app,[]}}]}.
