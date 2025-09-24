@@ -4,4 +4,5 @@
               {modules,[]},
               {registered,[opentsdb_sup]},
               {applications,[kernel,stdlib,jsx,hackney]},
+              {licenses, ["Apache 2.0"]},
               {mod,{opentsdb_app,[]}}]}.
