@@ -55,6 +55,6 @@ t_put(_) ->
                                        tags => #{host => web01}},
                                      [{details, {present, false}},
                                       {summary, {present, false}}]),
-    {error, 400, _} = opentsdb:put(Pid, #{metric => <<"sys.cpu.nice">>,
-                                          value => <<"20a">>,
-                                          tags => #{host => web01}}).
+    {error, {400, _}} = opentsdb:put(Pid, #{metric => <<"sys.cpu.nice">>,
+                                            value => <<"20a">>,
+                                            tags => #{host => web01}}).
