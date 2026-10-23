@@ -15,8 +15,29 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     application:stop(opentsdb).
 
+wait_until_up(Server) ->
+    [Host, Port0] = string:split(Server, ":"),
+    Port = list_to_integer(Port0),
+    do_wait_until_up({Host, Port}, 100).
+
+do_wait_until_up({Host, Port} = Server, N) ->
+    case gen_tcp:connect(Host, Port, [], 1_000) of
+        {error, _} when N > 0 ->
+            ct:sleep(1_000),
+            do_wait_until_up(Server, N - 1);
+        {error, Reason} ->
+            error({server_not_up, Reason});
+        {ok, Sock} ->
+            gen_tcp:close(Sock),
+            ok
+    end.
+
 t_put(_) ->
-    {ok, Pid} = opentsdb:start_link(),
+    Server = os:getenv("OPENTS_SERVER", "localhost:4242"),
+    wait_until_up(Server),
+    Opts = [{server, Server}],
+    ct:pal("using opts ~p", [Opts]),
+    {ok, Pid} = opentsdb:start_link(Opts),
     {ok, 200, Result} = opentsdb:put(Pid, [#{metric => <<"sys.cpu.nice">>,
                                              value => 20,
                                              tags => #{host => web01}},
