@@ -57,7 +57,9 @@
 
     sync_timeout = 0 :: milliseconds(),
 
-    max_batch_size = 20 :: integer()
+    max_batch_size = 20 :: integer(),
+
+    ssl_opts :: list()
 }).
 
 %% API.
@@ -90,7 +92,7 @@ put(Pid, DataPoints) ->
                         value := value(),
                         tags := tags()},
          Options :: [Option],
-         Option :: {server, server()} | 
+         Option :: {server, server()} |
                    {summary, present()} |
                    {details, present()} |
                    {sync, present()} |
@@ -126,14 +128,16 @@ unix_timestamp(milliseconds) ->
 %% gen_server.
 
 init([Opts]) ->
+    SSLOpts = proplists:get_value(ssl_opts, Opts, []),
     State = #state{server         = proplists:get_value(server, Opts, ?default_server),
                    summary        = {present, proplists:get_value(summary, Opts, true)},
                    details        = {present, proplists:get_value(details, Opts, false)},
                    sync           = {present, proplists:get_value(sync, Opts, true)},
                    sync_timeout   = proplists:get_value(sync_timeout, Opts, ?default_sync_timeout),
-                   max_batch_size = proplists:get_value(max_batch_size, Opts, ?default_max_batch_size)
+                   max_batch_size = proplists:get_value(max_batch_size, Opts, ?default_max_batch_size),
+                   ssl_opts       = SSLOpts
             },
-	{ok, State}.
+    {ok, State}.
 
 handle_call({put, DataPoints, Options}, _From, State = #state{sync = Sync, max_batch_size = MaxBatchSize}) ->
     case proplists:get_value(sync, Options, Sync) of
@@ -151,7 +155,8 @@ handle_call({put, DataPoints, Options}, _From, State = #state{sync = Sync, max_b
     end;
 handle_call({version, Options}, _From, State = #state{server = Server0}) ->
     Server = proplists:get_value(server, Options, Server0),
-    {reply, http_request(get, make_uri(Server, ["api/version"], []), <<>>), State};
+    SSLOpts = State#state.ssl_opts,
+    {reply, http_request(get, make_uri(Server, ["api/version"], []), <<>>, SSLOpts), State};
 handle_call(_Request, _From, State) ->
 	{reply, ignored, State}.
 
@@ -210,13 +215,14 @@ put_(DataPoints, Options0, #state{server = Server0,
                                   summary = Summary0,
                                   details = Details0,
                                   sync = Sync0,
-                                  sync_timeout = SyncTimeout0}) ->
+                                  sync_timeout = SyncTimeout0,
+                                  ssl_opts = SSLOpts}) ->
     Server = proplists:get_value(server, Options0, Server0),
     Sync = proplists:get_value(sync, Options0, Sync0),
     Options = [{summary, proplists:get_value(summary, Options0, Summary0)},
                {details, proplists:get_value(details, Options0, Details0)},
                {sync, Sync}],
-    Options1 = 
+    Options1 =
         case Sync of
             {present, true} ->
                 [{sync_timeout, proplists:get_value(sync_timeout, Options0, SyncTimeout0)} | Options];
@@ -225,15 +231,17 @@ put_(DataPoints, Options0, #state{server = Server0,
         end,
     http_request(post,
                 make_uri(Server, ["api/put"], make_query_params(Options1)),
-                jsx:encode(DataPoints)).
+                jsx:encode(DataPoints),
+                SSLOpts).
 
-http_request(Method, Server, Payload) ->
+http_request(Method, Server, Payload, SSLOpts) ->
     Headers = [{<<"Content-Type">>, <<"application/json">>}],
     Options = [{pool, default},
                {connect_timeout, 10000},
                {recv_timeout, 30000},
                {follow_redirectm, true},
                {max_redirect, 5},
+               {ssl_options, SSLOpts},
                with_body],
     case hackney:request(Method, Server, Headers, Payload, Options) of
         {ok, StatusCode, _Headers, ResponseBody}
