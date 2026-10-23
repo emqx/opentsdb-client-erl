@@ -239,7 +239,7 @@ http_request(Method, Server, Payload, SSLOpts) ->
     Options = [{pool, default},
                {connect_timeout, 10000},
                {recv_timeout, 30000},
-               {follow_redirectm, true},
+               {follow_redirect, true},
                {max_redirect, 5},
                {ssl_options, SSLOpts},
                with_body],
