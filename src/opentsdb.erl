@@ -14,6 +14,7 @@
         , handle_info/2
         , terminate/2
         , code_change/3
+        , format_status/1
         ]).
 
 -export([ put/2
@@ -171,6 +172,22 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
+
+format_status(#{state := State} = Status) ->
+    SSLOpts = redact_ssl_opts(State#state.ssl_opts),
+    Status#{state := State#state{ssl_opts = SSLOpts}};
+format_status(Status) ->
+    Status.
+
+redact_ssl_opts(SSLOpts0) ->
+    lists:map(
+      fun({password, _}) ->
+              {password, <<"******">>};
+         (X) ->
+              X
+      end,
+      SSLOpts0
+     ).
 
 %%====================================================================
 %% Internal functions

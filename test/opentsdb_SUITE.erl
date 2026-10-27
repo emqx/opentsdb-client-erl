@@ -6,7 +6,19 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> [t_put].
+%% keep in sync with `opentsdb` module
+-record(state, {
+    server,
+    summary,
+    details,
+    sync,
+    sync_timeout,
+    max_batch_size,
+    ssl_opts
+}).
+
+all() ->
+    [t_put, t_redact_ssl_password].
 
 init_per_suite(Config) ->
     application:ensure_all_started(opentsdb),
@@ -58,3 +70,18 @@ t_put(_) ->
     {error, {400, _}} = opentsdb:put(Pid, #{metric => <<"sys.cpu.nice">>,
                                             value => <<"20a">>,
                                             tags => #{host => web01}}).
+
+t_redact_ssl_password(_TCConfig) ->
+    {ok, Pid} = opentsdb:start_link([{ssl_opts, [{password, <<"secret">>}]}]),
+    {status, Pid, {module, _GenServer}, Items} = sys:get_status(Pid),
+    opentsdb:stop(Pid),
+    ct:pal("~p", [Items]),
+    [#state{ssl_opts = SSLOpts}] = [State
+                                    || Items0 <- Items,
+                                       is_list(Items0),
+                                       {data, Items1} <- Items0,
+                                       is_list(Items1),
+                                       {"State", State} <- Items1
+                                   ],
+   ?assertMatch(<<"******">>, proplists:get_value(password, SSLOpts)),
+    ok.
